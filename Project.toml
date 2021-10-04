@@ -1,0 +1,7 @@
+[deps]
+ArchGDAL = "c9ce4bd3-c3d5-55b8-8973-c0e20141b8c3"
+ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
+Geodesy = "0ef565a4-170c-5f04-8de2-149903a85f3d"
+OSMPBF = "5c469bec-fd6e-4bbc-be84-fbc5b3a3adfe"
+ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
+SQLite = "0aa819cd-b072-5ff4-a722-6bc24af294d9"
