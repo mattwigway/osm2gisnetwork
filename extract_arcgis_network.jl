@@ -8,12 +8,19 @@ using ArgParse
 using ProgressMeter
 using Geodesy
 
+EdgeRef = @NamedTuple{nodes::Vector{Int64}, fcid::Int32, oneway::String}
+
+include("compute_heading.jl")
+include("process_turn_restrictions.jl")
+
 argtable = ArgParseSettings()
 @add_arg_table! argtable begin
     "infile"
         help = "Input OSM PBF files"
     "outfile"
         help = "Output file"
+    "turnfile"
+        help = "Output turn restrictions"
     "--driver"
         help = "GDAL driver to use to write outfile, default ESRI Shapefile (https://gdal.org/drivers/vector/index.html for full list, some may not be available on your system)"
         default = "ESRI Shapefile"
@@ -200,10 +207,13 @@ function main()
     @info "Read $read_nodes nodes"
 
     @info "Constructing GDAL geometries"
+    way_segment_index = Dict{Int64, Vector{EdgeRef}}()
+
     # https://discourse.julialang.org/t/how-to-create-a-new-shapefile-containing-a-few-points/43454/3
     ArchGDAL.create(outfile, driver = ArchGDAL.getdriver(driver)) do ds
         # EPSG 4326 - WGS 84 - coordinate reference system used by OpenStreetMap
         ArchGDAL.createlayer(geom=ArchGDAL.wkbLineString, spatialref=ArchGDAL.importEPSG(4326)) do layer
+            ArchGDAL.addfielddefn!(layer, "fcid", ArchGDAL.OFTInteger)
             ArchGDAL.addfielddefn!(layer, "highway", ArchGDAL.OFTString)
             ArchGDAL.addfielddefn!(layer, "name", ArchGDAL.OFTString)
             #ArchGDAL.addfielddefn!(layer, "ref", ArchGDAL.OFTString)
@@ -214,6 +224,7 @@ function main()
             ArchGDAL.addfielddefn!(layer, "Oneway", ArchGDAL.OFTString)
             lats = Vector{Float64}()
             lons = Vector{Float64}()
+            fcid::Int32 = zero(Int32)
 
             fprog = Progress(total_ways)
             scan_pbf(infile, ways = way -> begin
@@ -224,6 +235,9 @@ function main()
                     end
                     empty!(lats)
                     empty!(lons)
+                    edges_for_way = Vector{EdgeRef}()
+                    nodes = Vector{Int64}()
+                    push!(nodes, way.nodes[1])
 
                     # prepopulate with first node
                     fr_node_id = way.nodes[1]
@@ -234,6 +248,7 @@ function main()
                     length_meters = 0
 
                     for (i, nodeid) in enumerate(way.nodes[2:end])
+                        push!(nodes, nodeid)
                         node = location_for_nodeid[nodeid]
                         push!(lats, node.lat)
                         push!(lons, node.lon)
@@ -246,24 +261,28 @@ function main()
                             # break the way here, create a feature
                             ArchGDAL.createfeature(layer) do f
                                 ArchGDAL.setgeom!(f, ArchGDAL.createlinestring(lons, lats))
-                                ArchGDAL.setfield!(f, 0, way.tags["highway"])
+                                ArchGDAL.setfield!(f, 0, fcid)
+                                ArchGDAL.setfield!(f, 1, way.tags["highway"])
                                 if haskey(way.tags, "name")
-                                    ArchGDAL.setfield!(f, 1, way.tags["name"])
+                                    ArchGDAL.setfield!(f, 2, way.tags["name"])
                                 else
-                                    ArchGDAL.setfield!(f, 1, "")
+                                    ArchGDAL.setfield!(f, 2, "")
                                 end
             
-                                ArchGDAL.setfield!(f, 2, way.id)
-                                ArchGDAL.setfield!(f, 3, fr_node_id)
-                                ArchGDAL.setfield!(f, 4, nodeid)
+                                ArchGDAL.setfield!(f, 3, way.id)
+                                ArchGDAL.setfield!(f, 4, fr_node_id)
+                                ArchGDAL.setfield!(f, 5, nodeid)
 
                                 maxspeed = speed_for_way(way)
                                 # note that this does not account for turn/intersection costs (accounted separately)
                                 travel_time_minutes = (length_meters / 1000) / maxspeed * 60
-                                ArchGDAL.setfield!(f, 5, travel_time_minutes)
+                                ArchGDAL.setfield!(f, 6, travel_time_minutes)
                                 
                                 # figure out oneway
-                                ArchGDAL.setfield!(f, 6, oneway(way))
+                                ArchGDAL.setfield!(f, 7, oneway(way))
+
+                                push!(edges_for_way, (nodes=nodes, fcid=fcid, oneway=oneway(way)))
+                                fcid += 1
                             end
                             # prepare for next way segment
                             empty!(lats)
@@ -271,15 +290,23 @@ function main()
                             length_meters = 0
                             push!(lats, node.lat)
                             push!(lons, node.lon)
+                            nodes = Vector{Int64}()
                             fr_node_id = nodeid
+                            push!(nodes, fr_node_id)
                         end
                     end
+
+                    way_segment_index[way.id] = edges_for_way
                 end
             end)
             ProgressMeter.finish!(fprog)
             ArchGDAL.copy(layer, dataset=ds)
         end
     end
+
+    @info "Writing turn features"
+    write_turn_features(infile, outfile, way_segment_index, location_for_nodeid)
+
 end
 
 main()
