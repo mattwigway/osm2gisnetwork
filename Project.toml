@@ -1,7 +1,10 @@
 [deps]
 ArchGDAL = "c9ce4bd3-c3d5-55b8-8973-c0e20141b8c3"
 ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
+DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
 Geodesy = "0ef565a4-170c-5f04-8de2-149903a85f3d"
+Graphs = "86223c79-3864-5bf0-83f7-82e725a168b6"
+MetaGraphs = "626554b9-1ddb-594c-aa3c-2596fe9399a5"
 OSMPBF = "5c469bec-fd6e-4bbc-be84-fbc5b3a3adfe"
 ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
 SQLite = "0aa819cd-b072-5ff4-a722-6bc24af294d9"

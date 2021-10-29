@@ -1,7 +1,7 @@
 using Geodesy
 
 # how much of the road do we need to use to calculate headings (crow-flies meters from end)
-const MIN_HEADING_DISTANCE_METERS = Float32(100)
+const MIN_HEADING_DISTANCE_METERS = Float32(15)
 
 function compute_heading(from::LatLon, to::LatLon)::Float32
     # # https://towardsdatascience.com/calculating-the-bearing-between-two-geospatial-coordinates-66203f57e4b4

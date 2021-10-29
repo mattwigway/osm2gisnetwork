@@ -8,7 +8,7 @@ using ArgParse
 using ProgressMeter
 using Geodesy
 
-EdgeRef = @NamedTuple{nodes::Vector{Int64}, fcid::Int32, oneway::String}
+EdgeRef = @NamedTuple{way::Int64, nodes::Vector{Int64}, fcid::Int32, oneway::String}
 
 include("compute_heading.jl")
 include("process_turn_restrictions.jl")
@@ -281,7 +281,7 @@ function main()
                                 # figure out oneway
                                 ArchGDAL.setfield!(f, 7, oneway(way))
 
-                                push!(edges_for_way, (nodes=nodes, fcid=fcid, oneway=oneway(way)))
+                                push!(edges_for_way, (way=way.id, nodes=nodes, fcid=fcid, oneway=oneway(way)))
                                 fcid += 1
                             end
                             # prepare for next way segment
