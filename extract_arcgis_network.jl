@@ -305,7 +305,8 @@ function main()
     end
 
     @info "Writing turn features"
-    write_turn_features(infile, outfile, way_segment_index, location_for_nodeid)
+    turnfile = match(r"^(.*?)(.shp)?$", outfile)[1] * "_turns.shp"
+    write_turn_features(infile, turnfile, way_segment_index, location_for_nodeid)
 
 end
 

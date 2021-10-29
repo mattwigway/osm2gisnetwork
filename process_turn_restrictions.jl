@@ -12,6 +12,13 @@ const STRAIGHT_RANGES = [(-30, 30)]
 const RIGHT_TURN_RANGES = [(30, 150)]
 const U_TURN_RANGES = [(-Inf32, -150), (150, Inf32)]
 
+struct TurnRestriction
+    edges::AbstractVector{Int32}
+    edge_1_end::Bool
+    geom::Vector{LatLon} 
+    turn_angle::Float32   
+end
+
 # Get the restriction type (no_left_turn etc) for a restriction
 function get_rtype(r)
     if haskey(r.tags, "restriction")
@@ -25,6 +32,8 @@ end
 
 function write_turn_features(infile::String, outfile::String, way_segment_idx::Dict{Int64, Vector{EdgeRef}},
         node_locations::Dict{Int64, LatLon})
+
+    turn_restrictions = Vector{TurnRestriction}()
     @info "Parsing turn restrictions"
     rprog = ProgressUnknown()
     scan_pbf(infile, relations=r -> begin
@@ -74,6 +83,9 @@ function write_turn_features(infile::String, outfile::String, way_segment_idx::D
                 if length(via) == 1 && via[1].type == OSMPBF.node
                     @info "parsing restriction with via node"
                     parsed = process_simple_restriction(r, from, to, via[1], way_segment_idx, node_locations)
+                    if !isnothing(parsed)
+                        push!(turn_restrictions, parsed)
+                    end
                 elseif length(via) ≥ 1 && all(map(v -> v.type == OSMPBF.way, via))
                     @info "parsing restriction with via way(s)"
                 elseif length(via) == 0
@@ -84,6 +96,45 @@ function write_turn_features(infile::String, outfile::String, way_segment_idx::D
             end
         end
     end)
+
+    @info "created $(length(turn_restrictions)) turn restrictions"
+
+    # find the maximum number of edges in turn restrictions
+    max_edges = max(map(r -> length(r.edges), turn_restrictions)...)
+
+    @info "all turn restrictions have $max_edges edges or less"
+
+    # https://discourse.julialang.org/t/how-to-create-a-new-shapefile-containing-a-few-points/43454/3
+    ArchGDAL.create(outfile, driver = ArchGDAL.getdriver("ESRI Shapefile")) do ds
+        # EPSG 4326 - WGS 84 - coordinate reference system used by OpenStreetMap
+        ArchGDAL.createlayer(geom=ArchGDAL.wkbLineString, spatialref=ArchGDAL.importEPSG(4326)) do layer
+            ArchGDAL.addfielddefn!(layer, "ObjectID", ArchGDAL.OFTInteger)
+            ArchGDAL.addfielddefn!(layer, "Bearing", ArchGDAL.OFTReal)
+            ArchGDAL.addfielddefn!(layer, "Edge1End", ArchGDAL.OFTInteger)
+            for i in 1:max_edges
+                ArchGDAL.addfielddefn!(layer, "Edge$(i)FID", ArchGDAL.OFTInteger)
+                # Pos attributes should not be required, the graph is noded (split at each intersection)
+            end
+
+            objid = 0
+            for restric in turn_restrictions
+                ArchGDAL.createfeature(layer) do f
+                    lons = getproperty.(restric.geom, [:lon])
+                    lats = getproperty.(restric.geom, [:lat])
+
+                    ArchGDAL.setgeom!(f, ArchGDAL.createlinestring(lons, lats))
+                    ArchGDAL.setfield!(f, 0, (objid += 1))
+                    ArchGDAL.setfield!(f, 1, restric.turn_angle)
+                    ArchGDAL.setfield!(f, 2, restric.edge_1_end ? 1 : 0)
+                    for (i, edge) in enumerate(restric.edges)
+                        ArchGDAL.setfield!(f, i + 2, edge)
+                    end
+                end
+            end
+
+            ArchGDAL.copy(layer, dataset=ds)
+        end
+    end
 end
 
 "Find the way segments that precede and follow this node"
@@ -92,12 +143,12 @@ function find_way_segment_by_node(candidates::Vector{EdgeRef}, node_id::Int64)
     after_ref = nothing
 
     for candidate in candidates
-        if candidate.nodes[1] == node_id
+        if candidate.nodes[end] == node_id
             isnothing(before_ref) || error("node $node_id appears more than once")
             before_ref = candidate
         end
 
-        if candidate.nodes[end] == node_id
+        if candidate.nodes[1] == node_id
             isnothing(after_ref) || error("node $node_id appears more than once")
             after_ref = candidate
         end
@@ -145,8 +196,6 @@ function process_simple_restriction(restric, from, to, via, way_segment_idx, nod
         return nothing
     end
     
-    found_combination = nothing
-
     #= check all possible combinations
     this is complicated by the fact that OSM ways are undirected. Consider a situation like this:
     
@@ -184,9 +233,10 @@ function process_simple_restriction(restric, from, to, via, way_segment_idx, nod
         # we are leaving the turn from the part of the way before the node, do traversing backwards
         to_back = isnothing(to_after)
 
+        bearing = get_turn_angle(from, from_back, to, to_back, node_locations)
+
         try
             if !is_turn_type(from, from_back, to, to_back, rtype, node_locations)
-                bearing = get_turn_angle(from, from_back, to, to_back, node_locations)
                 @warn "Restriction $(restric.id) is nonambiguous, but indicates it should be of type $(rtype), but has bearing $(bearing)°"
             end
         catch e
@@ -196,7 +246,24 @@ function process_simple_restriction(restric, from, to, via, way_segment_idx, nod
         end
 
         @info "generating restriction for $(restric.id)"
-        found_combination = from => to
+        from_geom = get.([node_locations], from.nodes, nothing)
+        if from_back
+            reverse!(from_geom)
+        end
+
+        to_geom = get.([node_locations], to.nodes, nothing)
+        if to_back
+            reverse!(to_geom)
+        end
+
+        geom = [from_geom..., to_geom[2:end]...]
+
+        return TurnRestriction(
+            [from.fcid, to.fcid],
+            !from_back,  # if the first edge is traversed backwards, we do not go through the end of it
+            geom,
+            bearing
+        )
     else
         candidates = [
             (from_before, false, to_after, false),  # traverse both forwards
@@ -220,6 +287,7 @@ function process_simple_restriction(restric, from, to, via, way_segment_idx, nod
                     return nothing
                 end
             end, "\n")
+            return
         elseif length(remaining_candidates) > 1
             backwards = "backwards"
             forwards = "forwards"
@@ -229,8 +297,30 @@ function process_simple_restriction(restric, from, to, via, way_segment_idx, nod
                     return " - way $(from.id) $(c[2] ? backwards : forwards) => way $(to.id) $(c[4] ? backwards : forwards) " +
                     "($(bearing)°)"
                 end, "\n")
+            return nothing
         else
             @info "generating restriction for $(restric.id)"
+            from, from_back, to, to_back = remaining_candidates[1]
+            bearing = get_turn_angle(from, from_back, to, to_back, node_locations)
+
+            from_geom = get.([node_locations], from.nodes, nothing)
+            if from_back
+                reverse!(from_geom)
+            end
+    
+            to_geom = get.([node_locations], to.nodes, nothing)
+            if to_back
+                reverse!(to_geom)
+            end
+    
+            geom = [from_geom..., to_geom[2:end]...]
+    
+            return TurnRestriction(
+                [from.fcid, to.fcid],
+                !from_back,  # if the first edge is traversed backwards, we do not go through the end of it
+                geom,
+                bearing
+            )
         end
     end
 end
@@ -269,3 +359,4 @@ function is_turn_type(first, first_back, second, second_back, type, node_locatio
     end
     return false # not in any target range
 end
+

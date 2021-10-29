@@ -302,7 +302,7 @@ uuid = "ca575930-c2e3-43a9-ace4-1e988b2c1908"
 
 [[OSMPBF]]
 deps = ["CodecZlib", "Mmap", "ProtoBuf"]
-git-tree-sha1 = "c66882f574cb2baa8521f04bea8078bab3fdeaf4"
+git-tree-sha1 = "fd73f888cb1866026f163d128d972fb586f4ebf5"
 repo-rev = "main"
 repo-url = "https://github.com/mattwigway/OSMPBF.jl.git"
 uuid = "5c469bec-fd6e-4bbc-be84-fbc5b3a3adfe"
