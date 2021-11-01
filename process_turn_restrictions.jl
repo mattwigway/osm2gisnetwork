@@ -275,7 +275,7 @@ function process_simple_restriction(restric, from, to, via, way_segment_idx, nod
         geom = [from_geom..., to_geom[2:end]...]
 
         return TurnRestriction(
-            [from.fcid, to.fcid],
+            [from.oid, to.oid],
             [from, to],
             !from_back,  # if the first edge is traversed backwards, we do not go through the end of it
             geom,
@@ -334,7 +334,7 @@ function process_simple_restriction(restric, from, to, via, way_segment_idx, nod
             geom = [from_geom..., to_geom[2:end]...]
     
             return TurnRestriction(
-                [from.fcid, to.fcid],
+                [from.oid, to.oid],
                 [from, to],
                 !from_back,  # if the first edge is traversed backwards, we do not go through the end of it
                 geom,
@@ -469,7 +469,7 @@ function process_complex_restriction(restric, from, to, way_segment_idx, node_lo
 end
 
 function construct_restriction_from_path(path::Vector{EdgeRef}, restric_id, node_locations)
-    edges = map(e -> e.fcid, path)
+    edges = map(e -> e.oid, path)
     back = falses(length(path))
     for (i, j) in zip(1:(length(path) - 1), 2:length(path))
         ei = path[i]

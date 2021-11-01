@@ -8,7 +8,7 @@ using ArgParse
 using ProgressMeter
 using Geodesy
 
-EdgeRef = @NamedTuple{way::Int64, nodes::Vector{Int64}, fcid::Int32, oneway::String}
+EdgeRef = @NamedTuple{way::Int64, nodes::Vector{Int64}, oid::Int32, oneway::String}
 
 include("compute_heading.jl")
 include("process_turn_restrictions.jl")
@@ -213,7 +213,7 @@ function main()
     ArchGDAL.create(outfile, driver = ArchGDAL.getdriver(driver)) do ds
         # EPSG 4326 - WGS 84 - coordinate reference system used by OpenStreetMap
         ArchGDAL.createlayer(geom=ArchGDAL.wkbLineString, spatialref=ArchGDAL.importEPSG(4326)) do layer
-            ArchGDAL.addfielddefn!(layer, "fcid", ArchGDAL.OFTInteger)
+            ArchGDAL.addfielddefn!(layer, "OBJECTID", ArchGDAL.OFTInteger)
             ArchGDAL.addfielddefn!(layer, "highway", ArchGDAL.OFTString)
             ArchGDAL.addfielddefn!(layer, "name", ArchGDAL.OFTString)
             #ArchGDAL.addfielddefn!(layer, "ref", ArchGDAL.OFTString)
@@ -224,7 +224,7 @@ function main()
             ArchGDAL.addfielddefn!(layer, "Oneway", ArchGDAL.OFTString)
             lats = Vector{Float64}()
             lons = Vector{Float64}()
-            fcid::Int32 = zero(Int32)
+            oid::Int32 = one(Int32)
 
             fprog = Progress(total_ways)
             scan_pbf(infile, ways = way -> begin
@@ -261,7 +261,7 @@ function main()
                             # break the way here, create a feature
                             ArchGDAL.createfeature(layer) do f
                                 ArchGDAL.setgeom!(f, ArchGDAL.createlinestring(lons, lats))
-                                ArchGDAL.setfield!(f, 0, fcid)
+                                ArchGDAL.setfield!(f, 0, oid)
                                 ArchGDAL.setfield!(f, 1, way.tags["highway"])
                                 if haskey(way.tags, "name")
                                     ArchGDAL.setfield!(f, 2, way.tags["name"])
@@ -281,8 +281,8 @@ function main()
                                 # figure out oneway
                                 ArchGDAL.setfield!(f, 7, oneway(way))
 
-                                push!(edges_for_way, (way=way.id, nodes=nodes, fcid=fcid, oneway=oneway(way)))
-                                fcid += 1
+                                push!(edges_for_way, (way=way.id, nodes=nodes, oid=oid, oneway=oneway(way)))
+                                oid += 1
                             end
                             # prepare for next way segment
                             empty!(lats)
