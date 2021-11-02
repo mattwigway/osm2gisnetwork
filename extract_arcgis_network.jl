@@ -63,9 +63,35 @@ const freeflow_speeds_kmh = Dict(
     "road" => DEFAULT_SPEED
 )
 
+const hierarchies = Dict(
+    "motorway" => 1,
+    "motorway_link" => 1,
+    "trunk" => 2,
+    "trunk_link" => 2,
+    "primary" => 2,
+    "primary_link" => 2,
+    "secondary" => 2,
+    "secondary_link" => 2,
+    "tertiary" => 2,
+    "tertiary_link" => 2,
+    "unclassified" => 3,
+    "residential" => 3,
+    "living_street" => 3,
+    "service" => 3,
+
+    # additional link types that are driveable
+    "road" => 3
+)
+
+const DEFAULT_HIERARCHY = 3
+
 function way_is_driveable(way::Way)::Bool
     if !haskey(way.tags, "highway") || !haskey(freeflow_speeds_kmh, way.tags["highway"])
         return false  # footway etc
+    end
+
+    if haskey(way.tags, "area") && way.tags["area"] == "yes"
+        return false  # driveable area, often coincident with other roads
     end
     
     driveable = true
@@ -222,6 +248,7 @@ function main()
             ArchGDAL.addfielddefn!(layer, "to_node_id", ArchGDAL.OFTInteger64)
             ArchGDAL.addfielddefn!(layer, "Minutes", ArchGDAL.OFTReal)
             ArchGDAL.addfielddefn!(layer, "Oneway", ArchGDAL.OFTString)
+            ArchGDAL.addfielddefn!(layer, "hierarchy", ArchGDAL.OFTInteger)
             lats = Vector{Float64}()
             lons = Vector{Float64}()
             oid::Int32 = one(Int32)
@@ -280,6 +307,9 @@ function main()
                                 
                                 # figure out oneway
                                 ArchGDAL.setfield!(f, 7, oneway(way))
+
+                                ArchGDAL.setfield!(f, 8, get(hierarchies, way.tags["highway"], DEFAULT_HIERARCHY))
+
 
                                 push!(edges_for_way, (way=way.id, nodes=nodes, oid=oid, oneway=oneway(way)))
                                 oid += 1
