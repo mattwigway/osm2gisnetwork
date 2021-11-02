@@ -19,9 +19,8 @@ const RIGHT_TURN_RANGES = [(15, 170)]
 const U_TURN_RANGES = [(-Inf32, -95), (95, Inf32)]
 
 struct TurnRestriction
-    edges::AbstractVector{Int32}
     segments::AbstractVector{EdgeRef}
-    edge_1_end::Bool
+    back::AbstractVector{Bool}
     geom::Vector{LatLon} 
     turn_angle::Float32
     osm_id::Int64
@@ -39,9 +38,9 @@ function get_rtype(r)
 end
 
 function write_turn_features(infile::String, outfile::String, way_segment_idx::Dict{Int64, Vector{EdgeRef}},
-        node_locations::Dict{Int64, LatLon})
+        node_locations::Dict{Int64, LatLon}, edges_for_node::Dict{Int64, Vector{EdgeRef}})
 
-    n_only = 0
+    n_wildcard = 0
     turn_restrictions = Vector{TurnRestriction}()
     @info "Parsing turn restrictions"
     rprog = ProgressUnknown()
@@ -52,8 +51,8 @@ function write_turn_features(infile::String, outfile::String, way_segment_idx::D
 
             rtype = get_rtype(r)
 
-            if startswith(rtype, "only_") || rtype == "no_exit" || rtype == "no_entry"
-                n_only += 1
+            if rtype == "no_exit" || rtype == "no_entry"
+                n_wildcard += 1
             else
                 # parse the restriction
                 from = nothing
@@ -89,33 +88,40 @@ function write_turn_features(infile::String, outfile::String, way_segment_idx::D
                     return
                 end
 
+                parsed = nothing
                 if length(via) == 1 && via[1].type == OSMPBF.node
                     parsed = process_simple_restriction(r, from, to, via[1], way_segment_idx, node_locations)
-                    if !isnothing(parsed)
-                        push!(turn_restrictions, parsed)
-                    end
                 elseif length(via) ≥ 1 && all(map(v -> v.type == OSMPBF.way, via))
                     parsed = process_complex_restriction(r, from, to, way_segment_idx, node_locations)
-                    if !isnothing(parsed)
-                        push!(turn_restrictions, parsed)
-                    end
                 elseif length(via) == 0
                     @warn "restriction $(r.id) has no via members, skipping"
                 else
                     @warn "via members of restriction $(r.id) are invalid (multiple nodes, mixed nodes/ways, relation members), skipping"
                 end
+
+                if !isnothing(parsed)
+                    if startswith(rtype, "no_")
+                        push!(turn_restrictions, parsed)
+                    elseif startswith(rtype, "only_")
+                        restrictions = convert_restriction_to_only_turn(parsed, node_locations, edges_for_node)
+                        append!(turn_restrictions, restrictions)
+                    else
+                        @error "Skipping turn restriction of type $rtype"
+                    end
+                end
+
             end
         end
     end)
 
     @info "created $(length(turn_restrictions)) turn restrictions"
 
-    if n_only > 0
-        @warn "Ignored $n_only no_entry, no_exit, or only_* restrictions"
+    if n_wildcard > 0
+        @warn "Ignored $n_wildcard no_entry or no_exit restrictions"
     end
 
     # find the maximum number of edges in turn restrictions
-    max_edges = max(map(r -> length(r.edges), turn_restrictions)...)
+    max_edges = max(map(r -> length(r.segments), turn_restrictions)...)
 
     @info "all turn restrictions have $max_edges edges or less"
 
@@ -148,7 +154,7 @@ function write_turn_features(infile::String, outfile::String, way_segment_idx::D
                 #     continue
                 # end
 
-                if length(restric.edges) ≤ 1
+                if length(restric.segments) ≤ 1
                     @error "Insufficient edges in $(restric.osm_id)"
                     continue
                 end
@@ -348,9 +354,8 @@ function process_simple_restriction(restric, from, to, via, way_segment_idx, nod
         end
 
         return TurnRestriction(
-            [from.oid, to.oid],
             [from, to],
-            !from_back,  # if the first edge is traversed backwards, we do not go through the end of it
+            [from_back, to_back],
             create_turn_geometry([from, to], [from_back, to_back], node_locations),
             bearing,
             restric.id
@@ -395,9 +400,8 @@ function process_simple_restriction(restric, from, to, via, way_segment_idx, nod
             bearing = get_turn_angle(from, from_back, to, to_back, node_locations)
     
             return TurnRestriction(
-                [from.oid, to.oid],
                 [from, to],
-                !from_back,  # if the first edge is traversed backwards, we do not go through the end of it
+                [from_back, to_back],
                 create_turn_geometry([from, to], [from_back, to_back], node_locations),
                 bearing,
                 restric.id
@@ -528,7 +532,6 @@ function process_complex_restriction(restric, from, to, way_segment_idx, node_lo
 end
 
 function construct_restriction_from_path(path::Vector{EdgeRef}, restric_id, node_locations)
-    edges = map(e -> e.oid, path)
     back = falses(length(path))
     for (i, j) in zip(1:(length(path) - 1), 2:length(path))
         ei = path[i]
@@ -573,9 +576,8 @@ function construct_restriction_from_path(path::Vector{EdgeRef}, restric_id, node
     bearing = get_turn_angle(path[1], back[1], path[end], back[end], node_locations)
 
     return TurnRestriction(
-        edges,
         path,
-        !back[1],  # if edge 1 is back, then it does not pass through the end
+        back,  # if edge 1 is back, then it does not pass through the end
         create_turn_geometry(path, back, node_locations),
         bearing,
         restric_id
@@ -620,63 +622,4 @@ function is_turn_type(bearing, type)
         end
     end
     return false # not in any target range
-end
-
-struct PathState
-    back::Union{PathState, Nothing}
-    at_vertex::Int64
-end
-
-"return all acyclic paths from origin nodes to destination nodes"
-function find_paths(g, origins, destinations)
-    q = Queue{PathState}()
-    states_at_dest = Vector{PathState}()
-
-    # enqueue all origins
-    for origin in origins
-        enqueue!(q, PathState(nothing, origin))
-    end
-
-    # while there is anything on the queue, pop it off and explore from it
-    # like dijkstra but without pqueue or vertex labels
-    while length(q) > 0
-        from_state = dequeue!(q)
-
-        prev_vertices = Set{Int64}()
-        back_state = from_state  # not from_state.back so we get current vertex in prev_vertices
-        while !isnothing(back_state)
-            push!(prev_vertices, back_state.at_vertex)
-            back_state = back_state.back
-        end
-
-        for vertex in Graphs.all_neighbors(g, from_state.at_vertex)
-              # don't loop, and only traverse a single origin edge (i.e. don't traverse all parts of an origin way) 
-            if !(vertex in prev_vertices) && !(vertex in origins)
-                next_state = PathState(from_state, vertex)
-                if vertex in destinations
-                    # we found a path
-                    push!(states_at_dest, next_state)
-                else
-                    # not there yet
-                    enqueue!(q, next_state)
-                end
-            end
-        end
-    end
-
-    # convert states to something more useful by back-traversing
-    paths = Vector{Vector{Int32}}()
-    sizehint!(paths, length(states_at_dest))
-    for state in states_at_dest
-        path = Vector{Int32}()
-        back_state = state
-        while !isnothing(back_state)
-            push!(path, back_state.at_vertex)
-            back_state = back_state.back
-        end
-        reverse!(path)
-        push!(paths, path)
-    end
-
-    return paths
 end

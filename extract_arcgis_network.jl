@@ -11,7 +11,9 @@ using Geodesy
 EdgeRef = @NamedTuple{way::Int64, nodes::Vector{Int64}, oid::Int32, oneway::String}
 
 include("compute_heading.jl")
+include("graph_algos.jl")
 include("process_turn_restrictions.jl")
+include("only_turn.jl")
 
 argtable = ArgParseSettings()
 @add_arg_table! argtable begin
@@ -212,6 +214,7 @@ function main()
     ProgressMeter.finish!(waysp)
 
     location_for_nodeid = Dict{Int64, LatLon}()
+    edges_for_node = Dict{Int64, Vector{EdgeRef}}()
 
     expected_nodes = length(nodes_to_retain)
     @info "Pass 2: Reading $expected_nodes nodes"
@@ -310,8 +313,21 @@ function main()
 
                                 ArchGDAL.setfield!(f, 8, get(hierarchies, way.tags["highway"], DEFAULT_HIERARCHY))
 
+                                edge = (way=way.id, nodes=nodes, oid=oid, oneway=oneway(way))
+                                push!(edges_for_way, edge)
 
-                                push!(edges_for_way, (way=way.id, nodes=nodes, oid=oid, oneway=oneway(way)))
+                                if !haskey(edges_for_node, fr_node_id)
+                                    edges_for_node[fr_node_id] = [edge]
+                                else
+                                    push!(edges_for_node[fr_node_id], edge)
+                                end
+
+                                if !haskey(edges_for_node, nodeid)
+                                    edges_for_node[nodeid] = [edge]
+                                else
+                                    push!(edges_for_node[nodeid], edge)
+                                end
+
                                 oid += 1
                             end
                             # prepare for next way segment
@@ -336,7 +352,7 @@ function main()
 
     @info "Writing turn features"
     turnfile = match(r"^(.*?)(.shp)?$", outfile)[1] * "_turns.shp"
-    write_turn_features(infile, turnfile, way_segment_index, location_for_nodeid)
+    write_turn_features(infile, turnfile, way_segment_index, location_for_nodeid, edges_for_node)
 
 end
 
