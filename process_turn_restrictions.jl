@@ -125,27 +125,49 @@ function write_turn_features(infile::String, outfile::String, way_segment_idx::D
         ArchGDAL.createlayer(geom=ArchGDAL.wkbLineString, spatialref=ArchGDAL.importEPSG(4326)) do layer
             ArchGDAL.addfielddefn!(layer, "ObjectID", ArchGDAL.OFTInteger)
             ArchGDAL.addfielddefn!(layer, "Bearing", ArchGDAL.OFTReal)
+            ArchGDAL.addfielddefn!(layer, "restricted", ArchGDAL.OFTInteger)
             ArchGDAL.addfielddefn!(layer, "OSMID", ArchGDAL.OFTInteger64)
-            ArchGDAL.addfielddefn!(layer, "Edge1End", ArchGDAL.OFTInteger)
-            for i in 1:max_edges
-                ArchGDAL.addfielddefn!(layer, "Edge$(i)FID", ArchGDAL.OFTInteger)
-                # Pos attributes should not be required, the graph is noded (split at each intersection)
-            end
+            #ArchGDAL.addfielddefn!(layer, "Edge1End", ArchGDAL.OFTInteger)
+            # for i in 1:max_edges
+            #     ArchGDAL.addfielddefn!(layer, "Edge$(i)FID", ArchGDAL.OFTInteger)
+            #     ArchGDAL.addfielddefn!(layer, "Edge$(i)FCID", ArchGDAL.OFTInteger)
+            #     # Pos attributes should not be required, the graph is noded (split at each intersection)
+            # end
 
             objid = 0
             for restric in turn_restrictions
+                # skip = false
+                # for (fr, to) in zip(restric.geom[1:end - 1], restric.geom[2:end])
+                #     if euclidean_distance(fr, to) < 1
+                #         @error "Geometry for restriction $(restric.osm_id) has segments that are too short"
+                #         skip = true
+                #         break
+                #     end
+                # end
+                # if skip  # and they say loop labels are an antipattern
+                #     continue
+                # end
+
+                if length(restric.edges) ≤ 1
+                    @error "Insufficient edges in $(restric.osm_id)"
+                    continue
+                end
+
                 ArchGDAL.createfeature(layer) do f
                     lons = getproperty.(restric.geom, [:lon])
                     lats = getproperty.(restric.geom, [:lat])
 
                     ArchGDAL.setgeom!(f, ArchGDAL.createlinestring(lons, lats))
-                    ArchGDAL.setfield!(f, 0, (objid += 1))
-                    ArchGDAL.setfield!(f, 1, restric.turn_angle)
-                    ArchGDAL.setfield!(f, 2, restric.osm_id)
-                    ArchGDAL.setfield!(f, 3, restric.edge_1_end ? 1 : 0)
-                    for (i, edge) in enumerate(restric.edges)
-                        ArchGDAL.setfield!(f, i + 3, edge)
-                    end
+                    ArchGDAL.setfield!(f, 0, (objid += 1))  # ObjectID
+                    ArchGDAL.setfield!(f, 1, restric.turn_angle) # Bearing
+                    ArchGDAL.setfield!(f, 2, 1) # restricted
+                    ArchGDAL.setfield!(f, 3, restric.osm_id) # OSM ID
+                    # ArchGDAL.setfield!(f, 4, restric.edge_1_end ? 1 : 0)
+                    # for (i, edge) in enumerate(restric.edges)
+                    #     next_field = (i - 1) * 2 + 5
+                    #     ArchGDAL.setfield!(f, next_field, edge)
+                    #     ArchGDAL.setfield!(f, next_field + 1, 4)  # placeholder
+                    # end
                 end
             end
 
@@ -177,9 +199,72 @@ function find_way_segment_by_node(candidates::Vector{EdgeRef}, node_id::Int64)
     return before_ref, after_ref
 end
 
+"Find a vertex in the center of a line segment"
+function find_center(geom::AbstractVector{LatLon{Float64}}; frac=0.5)
+    distances = Vector{Float64}()
+    sizehint!(distances, length(geom))
+    push!(distances, 0)
+    for (fr, to) in zip(geom[1:end - 1], geom[2:end])
+        seg_len = euclidean_distance(fr, to)
+        push!(distances, distances[end] + seg_len)
+    end
+
+    # find the first vertex after the middle
+    target_dist = distances[end] * frac
+    first_after = findfirst(distances .≥ target_dist)
+    last_before = first_after - 1
+
+    # find the fraction along this line segment
+    seg_frac = (target_dist - distances[last_before]) / (distances[first_after] - distances[last_before])
+    g1 = geom[last_before]
+    g2 = geom[first_after]
+    return LatLon(g1.lat + (g2.lat - g1.lat) * seg_frac, g1.lon + (g2.lon - g1.lon) * seg_frac)
+end
+
+
 """
-Process a simple turn restriction, with a via node
+Create an ArcGIS-format geometry for a turn restriction.
+
+From https://desktop.arcgis.com/en/arcmap/latest/extensions/network-analyst/creating-a-turn-feature.htm
+
+"Sequentially click each line feature that makes up the turn. Multiple vertices can be placed along a single edge element,
+but at least one vertex must be placed on each edge element of the turn."
+
+For U-turns on a single edge, things are a bit more complicated. From
+https://desktop.arcgis.com/en/arcmap/latest/extensions/network-analyst/creating-a-turn-feature-representing-u-turns.htm
+
+"Click somewhere along the length of the line feature.
+Click at the end of the line feature where the U-turn occurs.
+Double-click along the length of the same line feature to finish the sketch."
+
+So we need three points with one at the vertex, contrary to usual instructions where you can't
+have turn features at intersections (not documented but Arc will give an error when importing.)
 """
+function create_turn_geometry(segments::AbstractVector{EdgeRef}, back::AbstractVector{Bool}, node_locations::Dict{Int64, LatLon})::AbstractVector{LatLon}
+    if length(segments) != 2 || segments[1].way != segments[2].way
+        # place two vertices on each edge, so that turn direction is clear in a feature
+        # such as https://www.openstreetmap.org/relation/3644873
+        geom = map(zip(segments, back)) do (seg, segback)
+            geom = get.([node_locations], seg.nodes, [nothing])
+            return [
+                find_center(geom; frac=segback ? 0.6 : 0.4),
+                find_center(geom; frac=segback ? 0.4 : 0.6)
+            ]
+        end |>
+        Iterators.flatten |>
+        collect
+    else
+        # special case for U-turn
+        geom = [
+            find_center(get.([node_locations], segments[1].nodes, [nothing])),
+            node_locations[segments[1].nodes[back[1] ? 1 : end]],
+            find_center(get.([node_locations], segments[2].nodes, [nothing]))
+        ]
+    end
+
+    return geom
+end
+
 function process_simple_restriction(restric, from, to, via, way_segment_idx, node_locations)
     # all the segments each way got split into
     if !haskey(way_segment_idx, from.id)
@@ -262,23 +347,11 @@ function process_simple_restriction(restric, from, to, via, way_segment_idx, nod
                 join(stacktrace(catch_backtrace()), "\n")
         end
 
-        from_geom = get.([node_locations], from.nodes, nothing)
-        if from_back
-            reverse!(from_geom)
-        end
-
-        to_geom = get.([node_locations], to.nodes, nothing)
-        if to_back
-            reverse!(to_geom)
-        end
-
-        geom = [from_geom..., to_geom[2:end]...]
-
         return TurnRestriction(
             [from.oid, to.oid],
             [from, to],
             !from_back,  # if the first edge is traversed backwards, we do not go through the end of it
-            geom,
+            create_turn_geometry([from, to], [from_back, to_back], node_locations),
             bearing,
             restric.id
         )
@@ -320,24 +393,12 @@ function process_simple_restriction(restric, from, to, via, way_segment_idx, nod
             @info "generating restriction for $(restric.id)"
             from, from_back, to, to_back = remaining_candidates[1]
             bearing = get_turn_angle(from, from_back, to, to_back, node_locations)
-
-            from_geom = get.([node_locations], from.nodes, nothing)
-            if from_back
-                reverse!(from_geom)
-            end
-    
-            to_geom = get.([node_locations], to.nodes, nothing)
-            if to_back
-                reverse!(to_geom)
-            end
-    
-            geom = [from_geom..., to_geom[2:end]...]
     
             return TurnRestriction(
                 [from.oid, to.oid],
                 [from, to],
                 !from_back,  # if the first edge is traversed backwards, we do not go through the end of it
-                geom,
+                create_turn_geometry([from, to], [from_back, to_back], node_locations),
                 bearing,
                 restric.id
             )
@@ -464,8 +525,6 @@ function process_complex_restriction(restric, from, to, way_segment_idx, node_lo
             return nothing
         end
     end
-
-
 end
 
 function construct_restriction_from_path(path::Vector{EdgeRef}, restric_id, node_locations)
@@ -511,27 +570,13 @@ function construct_restriction_from_path(path::Vector{EdgeRef}, restric_id, node
         !found && error("unreachable state")
     end
 
-    # make the geom
-    geom = Vector{LatLon}()
-    
-    for i in 1:length(path)
-        edge = path[i]
-        seg_geom = get.([node_locations], edge.nodes, nothing)
-        if back[i]
-            reverse!(seg_geom)
-        end
-
-        # don't duplicate vertices at intersections
-        append!(geom, i == 1 ? seg_geom : seg_geom[2:end])
-    end
-
     bearing = get_turn_angle(path[1], back[1], path[end], back[end], node_locations)
 
     return TurnRestriction(
         edges,
         path,
         !back[1],  # if edge 1 is back, then it does not pass through the end
-        geom,
+        create_turn_geometry(path, back, node_locations),
         bearing,
         restric_id
     )
