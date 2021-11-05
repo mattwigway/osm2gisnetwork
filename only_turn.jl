@@ -53,7 +53,12 @@ NB Elm -> NB Elm at Holly
 qed
 
 Only restrictions with via ways rather than nodes are uncommon, but do exist (e.g. https://www.openstreetmap.org/relation/7644917). This
-algorithm is general enough to support arbitrary number of edges (though things could get out of hand if )
+algorithm is general enough to support arbitrary number of edges (though things could get out of hand if there are many).
+
+It's technically undefined what an only restriction with a via way means. From the OSM wiki:  Going to other ways from the via point is forbidden with this relation.
+and via is defined as a node. One reading would be to say that an only-right-turn restriction from ways A - B - C would mean that after
+traveling A-B you can only go to C, but A-D would be allowed. But I think what this code actually does is more likely to be what is intended. From Way A at the node where
+it intersects way B, you can only go B-C.
 """
 function convert_restriction_to_only_turn(restric::TurnRestriction, node_locations::Dict{Int64, LatLon}, edges_for_node::Dict{Int64, Vector{EdgeRef}})
     restrictions = Vector{TurnRestriction}()
@@ -72,6 +77,7 @@ function convert_restriction_to_only_turn(restric::TurnRestriction, node_locatio
                 eref_back = eref.nodes[1] != end_node
                 segments = [restric.segments[1:edgeidx]; eref]
                 back = [restric.back[1:edgeidx]; eref_back]
+
                 geom = create_turn_geometry(segments, back, node_locations)
                 bearing = get_turn_angle(segments[1], back[1], segments[end], back[end], node_locations)
 

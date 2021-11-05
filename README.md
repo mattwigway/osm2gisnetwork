@@ -26,5 +26,5 @@ Steps:
 20. Under "Evaluators" for the new restriction property, for the turns layer, set the evaluator to constant, use restriction.
 21. In the travel modes tab, check "restriction" as a restriction to use.
 22. If desired, add a global turn cost default evaluator to the minutes field
-23. If desired, add a hierarchy to the attribute table.
+23. If desired, add a hierarchy to the attribute table - the shapefile output has a hierachy field with 1 for highways, 2 for secondary roads, and 3 for residential. Even if you do not use hierarchical routing, the hierarchy can be used to define turn costs
 20. Rebuild the network dataset.

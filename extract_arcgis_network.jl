@@ -14,6 +14,7 @@ include("compute_heading.jl")
 include("graph_algos.jl")
 include("process_turn_restrictions.jl")
 include("only_turn.jl")
+include("postprocess_turns.jl")
 
 argtable = ArgParseSettings()
 @add_arg_table! argtable begin
@@ -278,6 +279,11 @@ function main()
                     length_meters = 0
 
                     for (i, nodeid) in enumerate(way.nodes[2:end])
+                        if nodeid == nodes[end]
+                            # skip duplicated nodes
+                            continue
+                        end
+
                         push!(nodes, nodeid)
                         node = location_for_nodeid[nodeid]
                         push!(lats, node.lat)
@@ -286,8 +292,12 @@ function main()
                         length_meters += euclidean_distance(prev_loc, node)
                         prev_loc = node
 
-                        # +1 b/c we skipped the first node
-                        if in(nodeid, intersection_nodes) || (i + 1) == length(way.nodes)
+                        # +1, +2 b/c we skipped the first node
+                        # break at intersection, end, or if next node would form a loop (ArcGIS can't handle turn restrictions
+                        # that start or end on loop edges)
+                        # Note that this does not handle loop edges with no intervening nodes, but that doesn't really make
+                        # sense anyways
+                        if in(nodeid, intersection_nodes) || (i + 1) == length(way.nodes) || way.nodes[i + 2] == fr_node_id
                             # break the way here, create a feature
                             ArchGDAL.createfeature(layer) do f
                                 ArchGDAL.setgeom!(f, ArchGDAL.createlinestring(lons, lats))

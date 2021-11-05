@@ -18,6 +18,19 @@ const STRAIGHT_RANGES = [(-30, 30)]
 const RIGHT_TURN_RANGES = [(15, 170)]
 const U_TURN_RANGES = [(-Inf32, -95), (95, Inf32)]
 
+# make sure we don't get any weird/unexpected restrictions, like
+# no_right_turn_on_red
+const VALID_RESTRICTION = Set([
+    "no_left_turn",
+    "no_right_turn",
+    "no_u_turn",
+    "no_straight_on",
+    "only_left_turn",
+    "only_right_turn",
+    "only_u_turn",
+    "only_straight_on",
+])
+
 struct TurnRestriction
     segments::AbstractVector{EdgeRef}
     back::AbstractVector{Bool}
@@ -51,8 +64,9 @@ function write_turn_features(infile::String, outfile::String, way_segment_idx::D
 
             rtype = get_rtype(r)
 
-            if rtype == "no_exit" || rtype == "no_entry"
+            if !(rtype in VALID_RESTRICTION)
                 n_wildcard += 1
+                @warn "Skipping restriction $(r.id) with unknown type $rtype"
             else
                 # parse the restriction
                 from = nothing
@@ -113,6 +127,8 @@ function write_turn_features(infile::String, outfile::String, way_segment_idx::D
             end
         end
     end)
+
+    turn_restrictions = postprocess_turns(turn_restrictions, node_locations, edges_for_node)
 
     @info "created $(length(turn_restrictions)) turn restrictions"
 
