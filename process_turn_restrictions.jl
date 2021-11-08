@@ -434,6 +434,9 @@ function process_complex_restriction(restric, from, to, way_segment_idx, node_lo
     # via ways occur may or may not match the order they are traversed 🤦. Do a little depth-first search
     # to find all the ways you could hook them up.
 
+    # turns out OSM relations are ordered (https://wiki.openstreetmap.org/wiki/Elements), but let's not
+    # rely on them being coded properly. 
+
     # because the way segments rather than the nodes are what we care about, we use a "dual graph"
     # with nodes representing way segments and way segments representing nodes. See
     # Winter, Stephan. 2002. “Modeling Costs of Turns in Route Planning.” GeoInformatica 6

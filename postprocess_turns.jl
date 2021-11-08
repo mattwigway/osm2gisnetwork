@@ -132,12 +132,30 @@ function postprocess_turns(turns::Vector{TurnRestriction}, node_locations::Dict{
       end
     end
 
+    # filter out turns that are already prohibited by oneway restrictions
+    # not doing this at start of loop, b/c presumably at iteration 1 OSM does not
+    # have no-left-turn restrictions onto the wrong way on a one-way street etc. All
+    # violations of this rule are expected to result from expansion (or possibly only_turn
+    # restrictions, but since we iterate the algorithm those will wind up dropped as well)
+    n_turns = length(new_turns)
+    new_turns = filter(new_turns) do turn
+      for (seg, back) in zip(turn.segments, turn.back)
+        # if it's a forward one way (FT) traversed backwards or vice-versa, drop on floor
+        if (seg.oneway == "FT" && back) || (seg.oneway == "TF" && !back)
+          return false
+        end
+      end
+      return true
+    end
+
+    removed_turns += n_turns - length(new_turns)
+
     if fixed_turns == 0 && removed_turns == 0
       @info "All turn meet ArcGIS standards after $iter iteration(s)"
       return new_turns
     else
       n_new = length(new_turns) + removed_turns - length(turns)
-      @info "In iteration $iter, expanded $fixed_turns turns into $n_new turns, and removed $removed_turns duplicate turns"
+      @info "In iteration $iter, expanded $fixed_turns turns into $n_new turns, and removed $removed_turns duplicate or superfluous turns"
       turns = new_turns
     end
   end
