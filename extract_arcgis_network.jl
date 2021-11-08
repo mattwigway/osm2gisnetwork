@@ -153,7 +153,7 @@ function speed_for_way(w::Way)::Float64
     # calculate travel time
     if haskey(w.tags, "maxspeed")
         maxspeed = parse_max_speed(w.tags["maxspeed"])
-        if isfinite(maxspeed)
+        if !ismissing(maxspeed) && isfinite(maxspeed)
             return maxspeed
         end
     end
