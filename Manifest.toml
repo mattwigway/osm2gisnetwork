@@ -13,10 +13,8 @@ uuid = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
 version = "3.3.1"
 
 [[ArchGDAL]]
-deps = ["CEnum", "ColorTypes", "Dates", "DiskArrays", "GDAL", "GeoFormatTypes", "GeoInterface", "ImageCore", "Tables"]
-git-tree-sha1 = "8f21d4df95993db8f41a052fc3d27d204ae4c6bd"
-repo-rev = "detailed-error"
-repo-url = "https://github.com/mattwigway/ArchGDAL.jl"
+deps = ["ColorTypes", "Dates", "DiskArrays", "GDAL", "GeoFormatTypes", "GeoInterface", "ImageCore", "Tables"]
+git-tree-sha1 = "245d68fd5749c0aee757da162c2956b595b274bb"
 uuid = "c9ce4bd3-c3d5-55b8-8973-c0e20141b8c3"
 version = "0.7.4"
 
