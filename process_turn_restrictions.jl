@@ -50,7 +50,7 @@ function get_rtype(r)
     end
 end
 
-function write_turn_features(infile::String, outfile::String, way_segment_idx::Dict{Int64, Vector{EdgeRef}},
+function write_turn_features(infile::String, dataset::ArchGDAL.Dataset, way_segment_idx::Dict{Int64, Vector{EdgeRef}},
         node_locations::Dict{Int64, LatLon}, edges_for_node::Dict{Int64, Vector{EdgeRef}})
 
     n_wildcard = 0
@@ -142,58 +142,54 @@ function write_turn_features(infile::String, outfile::String, way_segment_idx::D
     @info "all turn restrictions have $max_edges edges or less"
 
     # https://discourse.julialang.org/t/how-to-create-a-new-shapefile-containing-a-few-points/43454/3
-    ArchGDAL.create(outfile, driver = ArchGDAL.getdriver("ESRI Shapefile")) do ds
-        # EPSG 4326 - WGS 84 - coordinate reference system used by OpenStreetMap
-        ArchGDAL.createlayer(geom=ArchGDAL.wkbLineString, spatialref=ArchGDAL.importEPSG(4326)) do layer
-            ArchGDAL.addfielddefn!(layer, "ObjectID", ArchGDAL.OFTInteger)
-            ArchGDAL.addfielddefn!(layer, "Bearing", ArchGDAL.OFTReal)
-            ArchGDAL.addfielddefn!(layer, "restricted", ArchGDAL.OFTInteger)
-            ArchGDAL.addfielddefn!(layer, "OSMID", ArchGDAL.OFTInteger64)
-            #ArchGDAL.addfielddefn!(layer, "Edge1End", ArchGDAL.OFTInteger)
-            # for i in 1:max_edges
-            #     ArchGDAL.addfielddefn!(layer, "Edge$(i)FID", ArchGDAL.OFTInteger)
-            #     ArchGDAL.addfielddefn!(layer, "Edge$(i)FCID", ArchGDAL.OFTInteger)
-            #     # Pos attributes should not be required, the graph is noded (split at each intersection)
+    # EPSG 4326 - WGS 84 - coordinate reference system used by OpenStreetMap
+    ArchGDAL.createlayer(name="turns", geom=ArchGDAL.wkbLineString, dataset=dataset, spatialref=ArchGDAL.importEPSG(4326)) do layer
+        ArchGDAL.addfielddefn!(layer, "ObjectID", ArchGDAL.OFTInteger)
+        ArchGDAL.addfielddefn!(layer, "Bearing", ArchGDAL.OFTReal)
+        ArchGDAL.addfielddefn!(layer, "restricted", ArchGDAL.OFTInteger)
+        ArchGDAL.addfielddefn!(layer, "OSMID", ArchGDAL.OFTInteger64)
+        #ArchGDAL.addfielddefn!(layer, "Edge1End", ArchGDAL.OFTInteger)
+        # for i in 1:max_edges
+        #     ArchGDAL.addfielddefn!(layer, "Edge$(i)FID", ArchGDAL.OFTInteger)
+        #     ArchGDAL.addfielddefn!(layer, "Edge$(i)FCID", ArchGDAL.OFTInteger)
+        #     # Pos attributes should not be required, the graph is noded (split at each intersection)
+        # end
+
+        objid = 0
+        for restric in turn_restrictions
+            # skip = false
+            # for (fr, to) in zip(restric.geom[1:end - 1], restric.geom[2:end])
+            #     if euclidean_distance(fr, to) < 1
+            #         @error "Geometry for restriction $(restric.osm_id) has segments that are too short"
+            #         skip = true
+            #         break
+            #     end
+            # end
+            # if skip  # and they say loop labels are an antipattern
+            #     continue
             # end
 
-            objid = 0
-            for restric in turn_restrictions
-                # skip = false
-                # for (fr, to) in zip(restric.geom[1:end - 1], restric.geom[2:end])
-                #     if euclidean_distance(fr, to) < 1
-                #         @error "Geometry for restriction $(restric.osm_id) has segments that are too short"
-                #         skip = true
-                #         break
-                #     end
-                # end
-                # if skip  # and they say loop labels are an antipattern
-                #     continue
-                # end
-
-                if length(restric.segments) ≤ 1
-                    @error "Insufficient edges in $(restric.osm_id)"
-                    continue
-                end
-
-                ArchGDAL.createfeature(layer) do f
-                    lons = getproperty.(restric.geom, [:lon])
-                    lats = getproperty.(restric.geom, [:lat])
-
-                    ArchGDAL.setgeom!(f, ArchGDAL.createlinestring(lons, lats))
-                    ArchGDAL.setfield!(f, 0, (objid += 1))  # ObjectID
-                    ArchGDAL.setfield!(f, 1, restric.turn_angle) # Bearing
-                    ArchGDAL.setfield!(f, 2, 1) # restricted
-                    ArchGDAL.setfield!(f, 3, restric.osm_id) # OSM ID
-                    # ArchGDAL.setfield!(f, 4, restric.edge_1_end ? 1 : 0)
-                    # for (i, edge) in enumerate(restric.edges)
-                    #     next_field = (i - 1) * 2 + 5
-                    #     ArchGDAL.setfield!(f, next_field, edge)
-                    #     ArchGDAL.setfield!(f, next_field + 1, 4)  # placeholder
-                    # end
-                end
+            if length(restric.segments) ≤ 1
+                @error "Insufficient edges in $(restric.osm_id)"
+                continue
             end
 
-            ArchGDAL.copy(layer, dataset=ds)
+            ArchGDAL.addfeature(layer) do f
+                lons = getproperty.(restric.geom, [:lon])
+                lats = getproperty.(restric.geom, [:lat])
+
+                ArchGDAL.setgeom!(f, ArchGDAL.createlinestring(lons, lats))
+                ArchGDAL.setfield!(f, 0, (objid += 1))  # ObjectID
+                ArchGDAL.setfield!(f, 1, restric.turn_angle) # Bearing
+                ArchGDAL.setfield!(f, 2, 1) # restricted
+                ArchGDAL.setfield!(f, 3, restric.osm_id) # OSM ID
+                # ArchGDAL.setfield!(f, 4, restric.edge_1_end ? 1 : 0)
+                # for (i, edge) in enumerate(restric.edges)
+                #     next_field = (i - 1) * 2 + 5
+                #     ArchGDAL.setfield!(f, next_field, edge)
+                #     ArchGDAL.setfield!(f, next_field + 1, 4)  # placeholder
+                # end
+            end
         end
     end
 end

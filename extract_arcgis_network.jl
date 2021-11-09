@@ -25,8 +25,8 @@ argtable = ArgParseSettings()
     "turnfile"
         help = "Output turn restrictions"
     "--driver"
-        help = "GDAL driver to use to write outfile, default ESRI Shapefile (https://gdal.org/drivers/vector/index.html for full list, some may not be available on your system)"
-        default = "ESRI Shapefile"
+        help = "GDAL driver to use to write outfile, default GeoPackage (https://gdal.org/drivers/vector/index.html for full list, some may not be available on your system)"
+        default = "GPKG"
 end
 
 const MILES_TO_KILOMETERS = 1.609344
@@ -242,7 +242,7 @@ function main()
     # https://discourse.julialang.org/t/how-to-create-a-new-shapefile-containing-a-few-points/43454/3
     ArchGDAL.create(outfile, driver = ArchGDAL.getdriver(driver)) do ds
         # EPSG 4326 - WGS 84 - coordinate reference system used by OpenStreetMap
-        ArchGDAL.createlayer(geom=ArchGDAL.wkbLineString, spatialref=ArchGDAL.importEPSG(4326)) do layer
+        ArchGDAL.createlayer(name="network", geom=ArchGDAL.wkbLineString, dataset=ds, spatialref=ArchGDAL.importEPSG(4326)) do layer
             ArchGDAL.addfielddefn!(layer, "OBJECTID", ArchGDAL.OFTInteger)
             ArchGDAL.addfielddefn!(layer, "highway", ArchGDAL.OFTString)
             ArchGDAL.addfielddefn!(layer, "name", ArchGDAL.OFTString)
@@ -299,7 +299,7 @@ function main()
                         # sense anyways
                         if in(nodeid, intersection_nodes) || (i + 1) == length(way.nodes) || way.nodes[i + 2] == fr_node_id
                             # break the way here, create a feature
-                            ArchGDAL.createfeature(layer) do f
+                            ArchGDAL.addfeature(layer) do f
                                 ArchGDAL.setgeom!(f, ArchGDAL.createlinestring(lons, lats))
                                 ArchGDAL.setfield!(f, 0, oid)
                                 ArchGDAL.setfield!(f, 1, way.tags["highway"])
@@ -338,6 +338,8 @@ function main()
                                     push!(edges_for_node[nodeid], edge)
                                 end
 
+                                # createfeature uses setfeature! instead of addfeature!, so fid needs to be defined
+                                ArchGDAL.setfid!(f, oid)
                                 oid += 1
                             end
                             # prepare for next way segment
@@ -356,14 +358,11 @@ function main()
                 end
             end)
             ProgressMeter.finish!(fprog)
-            ArchGDAL.copy(layer, dataset=ds)
         end
+
+        @info "Writing turn features"
+        write_turn_features(infile, ds, way_segment_index, location_for_nodeid, edges_for_node)
     end
-
-    @info "Writing turn features"
-    turnfile = match(r"^(.*?)(.shp)?$", outfile)[1] * "_turns.shp"
-    write_turn_features(infile, turnfile, way_segment_index, location_for_nodeid, edges_for_node)
-
 end
 
 main()
