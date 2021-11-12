@@ -102,28 +102,33 @@ function write_turn_features(infile::String, dataset::ArchGDAL.Dataset, way_segm
                     return
                 end
 
-                parsed = nothing
-                if length(via) == 1 && via[1].type == OSMPBF.node
-                    parsed = process_simple_restriction(r, from, to, via[1], way_segment_idx, node_locations)
-                elseif length(via) ≥ 1 && all(map(v -> v.type == OSMPBF.way, via))
-                    parsed = process_complex_restriction(r, from, to, way_segment_idx, node_locations)
-                elseif length(via) == 0
-                    @warn "restriction $(r.id) has no via members, skipping"
-                else
-                    @warn "via members of restriction $(r.id) are invalid (multiple nodes, mixed nodes/ways, relation members), skipping"
-                end
+                try
+                    parsed = nothing
 
-                if !isnothing(parsed)
-                    if startswith(rtype, "no_")
-                        push!(turn_restrictions, parsed)
-                    elseif startswith(rtype, "only_")
-                        restrictions = convert_restriction_to_only_turn(parsed, node_locations, edges_for_node)
-                        append!(turn_restrictions, restrictions)
+                    if length(via) == 1 && via[1].type == OSMPBF.node
+                        parsed = process_simple_restriction(r, from, to, via[1], way_segment_idx, node_locations)
+                    elseif length(via) ≥ 1 && all(map(v -> v.type == OSMPBF.way, via))
+                        parsed = process_complex_restriction(r, from, to, way_segment_idx, node_locations)
+                    elseif length(via) == 0
+                        @warn "restriction $(r.id) has no via members, skipping"
                     else
-                        @error "Skipping turn restriction of type $rtype"
+                        @warn "via members of restriction $(r.id) are invalid (multiple nodes, mixed nodes/ways, relation members), skipping"
                     end
-                end
 
+                    if !isnothing(parsed)
+                        if startswith(rtype, "no_")
+                            push!(turn_restrictions, parsed)
+                        elseif startswith(rtype, "only_")
+                            restrictions = convert_restriction_to_only_turn(parsed, node_locations, edges_for_node)
+                            append!(turn_restrictions, restrictions)
+                        else
+                            @error "Skipping turn restriction of type $rtype"
+                        end
+                    end
+                catch e
+                    @warn "Processing from way $(from.id) for restriction $(restric.id), $(e), skipping this restriction. Stacktrace:\n" *
+                    join(string.(stacktrace(catch_backtrace())), "\n")
+                end
             end
         end
     end)
