@@ -9,7 +9,12 @@ Steps:
 1. Download OSM for your area of interest, in PBF format, e.g. from [Protomaps](https://app.protomaps.com)
 2. Run the tool: `julia --project extract_gis_network.jl osm_file.pbf output.gpkg` to create a GeoPackage with two layers: one representing a fully-noded network, and one representing restricted turn
 
-Processing with ArcGIS (to include turn restrictions):
+## Using with QGIS
+
+- You need to reproject the network to a cartesian coordinate system (with units)
+- Turn restrictions are not supported, so you can ignore the `turns` layer
+
+## Using with ArcGIS (to include turn restrictions):
 
 1. In ArcGIS, create a file geodatabase to hold the network (or use an existing file geodatabase)
 4. Within the geodatabase, create a feature dataset to hold your network. Make sure the spatial reference is the same as the network shapefiles produced by step 2.
