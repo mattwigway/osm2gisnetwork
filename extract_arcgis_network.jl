@@ -1,7 +1,7 @@
 # Extract ArcGIS network
 # Extract a shapefile ready to be imported as an ArcGIS network dataset
 
-using OSMPBF
+using OpenStreetMapPBF
 using ArchGDAL
 using Logging
 using ArgParse
@@ -22,10 +22,8 @@ argtable = ArgParseSettings()
         help = "Input OSM PBF files"
     "outfile"
         help = "Output file"
-    "turnfile"
-        help = "Output turn restrictions"
     "--driver"
-        help = "GDAL driver to use to write outfile, default GeoPackage (https://gdal.org/drivers/vector/index.html for full list, some may not be available on your system)"
+        help = "GDAL driver to use to write outfile, default GeoPackage (https://gdal.org/drivers/vector/index.html for full list, some may not be available on your system; must support multiple layers per file)"
         default = "GPKG"
 end
 
