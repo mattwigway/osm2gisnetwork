@@ -2,7 +2,7 @@
 # schema:
 # https://desktop.arcgis.com/en/arcmap/latest/extensions/network-analyst/turns-in-the-network-dataset.htm
 
-using OSMPBF
+using OpenStreetMapPBF
 using Logging
 using ProgressMeter
 using Graphs
@@ -71,7 +71,7 @@ function write_turn_features(infile::String, dataset::ArchGDAL.Dataset, way_segm
                 # parse the restriction
                 from = nothing
                 to = nothing
-                via = Vector{OSMPBF.RelationMember}()
+                via = Vector{OpenStreetMapPBF.RelationMember}()
 
                 # sort members into roles
                 for member in r.members
@@ -105,9 +105,9 @@ function write_turn_features(infile::String, dataset::ArchGDAL.Dataset, way_segm
                 try
                     parsed = nothing
 
-                    if length(via) == 1 && via[1].type == OSMPBF.node
+                    if length(via) == 1 && via[1].type == OpenStreetMapPBF.node
                         parsed = process_simple_restriction(r, from, to, via[1], way_segment_idx, node_locations)
-                    elseif length(via) ≥ 1 && all(map(v -> v.type == OSMPBF.way, via))
+                    elseif length(via) ≥ 1 && all(map(v -> v.type == OpenStreetMapPBF.way, via))
                         parsed = process_complex_restriction(r, from, to, way_segment_idx, node_locations)
                     elseif length(via) == 0
                         @warn "restriction $(r.id) has no via members, skipping"
