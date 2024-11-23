@@ -1,12 +1,17 @@
-# Convert OpenStreetMap networks to ArcGIS networks
+# Convert OpenStreetMap networks to GIS networks
 
-This tool converts OSM networks to ArcGIS-networks, in a two step process.
+This tool converts OSM networks to GIS-networks, in a two step process.
 
 Steps:
 
-1. Download OSM for your area of interest, in PBF format, e.g. from [GeoFabrik](https://download.geofabrik.de)
-2. Run the tool: `julia --project extract_arcgis_network.jl osm_file.pbf output.shp` to create two network shapefiles, one with the network and one with turn restrictions. Write down the maximum number of edges printed at the end.
-3. In ArcGIS, create a file geodatabase to hold the network (or use an existing file geodatabase)
+0. (If necessary) Install [Julia](https://julialang.org)
+1. Install necessary dependencies: run `julia --project` in the `osm2gisnetwork` folder and type `]resolve` to install dependents
+1. Download OSM for your area of interest, in PBF format, e.g. from [Protomaps](https://app.protomaps.com)
+2. Run the tool: `julia --project extract_gis_network.jl osm_file.pbf output.gpkg` to create a GeoPackage with two layers: one representing a fully-noded network, and one representing restricted turn
+
+Processing with ArcGIS (to include turn restrictions):
+
+1. In ArcGIS, create a file geodatabase to hold the network (or use an existing file geodatabase)
 4. Within the geodatabase, create a feature dataset to hold your network. Make sure the spatial reference is the same as the network shapefiles produced by step 2.
 5. Use the "Feature Class to Feature Class" tool to copy the shapefiles into the feature dataset.
 6. Enable Network Analyst in Customize -> Extensions
